@@ -59,14 +59,51 @@ export default class PWAManager {
       window.dispatchEvent(new CustomEvent("pwa-installed"))
     })
 
-    // Register service worker
+    // Register service worker with proper configuration
     if ("serviceWorker" in navigator) {
       try {
-        this.registration = await navigator.serviceWorker.register("/sw.js")
-        console.log("Service Worker registered successfully")
+        // Wait for page load before registering
+        if (document.readyState === "loading") {
+          window.addEventListener("load", () => {
+            this.registerServiceWorker()
+          })
+        } else {
+          this.registerServiceWorker()
+        }
       } catch (error) {
-        console.error("Service Worker registration failed:", error)
+        console.error("Service Worker initialization failed:", error)
       }
+    }
+  }
+
+  private async registerServiceWorker() {
+    try {
+      this.registration = await navigator.serviceWorker.register("/sw.js", {
+        scope: "/",
+        updateViaCache: "none", // Always check for updates
+      })
+
+      console.log("Service Worker registered successfully:", this.registration.scope)
+
+      // Listen for updates
+      this.registration.addEventListener("updatefound", () => {
+        const newWorker = this.registration!.installing
+        if (newWorker) {
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              // New version available
+              window.dispatchEvent(new CustomEvent("pwa-update-available"))
+            }
+          })
+        }
+      })
+
+      // Check for updates periodically
+      setInterval(() => {
+        this.registration?.update()
+      }, 60000) // Check every minute
+    } catch (error) {
+      console.error("Service Worker registration failed:", error)
     }
   }
 
@@ -252,6 +289,36 @@ export default class PWAManager {
       console.log("All caches cleared")
     }
   }
+
+  // Update the service worker registration
+  async updateServiceWorker(): Promise<void> {
+    if (!this.registration) {
+      throw new Error("Service Worker not registered")
+    }
+
+    const newWorker = this.registration.waiting
+    if (newWorker) {
+      newWorker.postMessage({ type: "SKIP_WAITING" })
+      window.location.reload()
+    }
+  }
 }
 
 export const pwaManager = PWAManager.getInstance()
+
+// Initialize PWA Manager when the module loads
+if (typeof window !== "undefined") {
+  // Ensure proper service worker registration
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((registration) => {
+          console.log("SW registered: ", registration)
+        })
+        .catch((registrationError) => {
+          console.log("SW registration failed: ", registrationError)
+        })
+    })
+  }
+}
